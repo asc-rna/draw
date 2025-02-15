@@ -1,126 +1,113 @@
 import re
 from datetime import datetime
 
-# 从给定路径读取log文件内容
-log_file_path = "/home/scy24/asc-rna/.snakemake/log/"  # 请替换成你的日志文件路径
-log_file_path += "2025-01-18T144705.247394.snakemake.log"
-# 打开文件并读取内容
-with open(log_file_path, "r") as file:
-    log_data = file.readlines()
+def cal_stage_1_time(dic):
+    filter_time = dic["filter_bam"]
+    multi_time = max (dic["unfiltered_multi"] , dic["unfiltered_uniq"], filter_time + dic["filtered_multi"], filter_time + dic["filtered_uniq"])
+    other_time = dic["cut_fastq"] + dic["align_to_ncrna"] + dic["bam_to_fastq"] + \
+    dic["align_to_genome"] + dic["sort_bam"] + dic["umi_dedup"] +\
+    dic["join_pileup"]
 
-timestamp_pattern = re.compile( r'\[(.*?)\]')
-job_name_pattern = re.compile( r'localrule\s+(\S+):')
-jobid_pattern = re.compile (r'\s+jobid:\s*(\d+)')
-finished_job_pattern = re.compile (r'Finished\s+job\s+(\d+)')
-
-job_start_times = {}
-jobs = []
+    return multi_time + other_time
 
 
-for i in range(len(log_data)):
-    line = log_data[i]
-    time_match = timestamp_pattern.match(line)
-    if time_match:
-        start_time_str = time_match.group(1)
-        start_time = datetime.strptime(start_time_str, "%a %b %d %H:%M:%S %Y")
+def parse_log_for_job_duration(log_file_path):
+    # 打开文件并读取内容
+    with open(log_file_path, "r") as file:
+        log_data = file.readlines()
 
-        job_name_match = job_name_pattern.match(log_data[i+1])
-        if job_name_match is None:
-            continue;
-        job_name = job_name_match.group(1)
+    timestamp_pattern = re.compile(r'\[(.*?)\]')
+    job_name_pattern = re.compile(r'localrule\s+(\S+):')
+    jobid_pattern = re.compile(r'\s+jobid:\s*(\d+)')
+    finished_job_pattern = re.compile(r'Finished\s+job\s+(\d+)')
 
-        jobid_match = jobid_pattern.match(log_data[i+4])
-        if jobid_match is None:
-            continue;
-        job_id = jobid_match.group(1)
+    job_start_times = {}
+    jobs = {}
 
-        job_start_times[job_id] = {"start_time": start_time, "job_name": job_name}
-        # print("start_time: ", start_time, "job_name: ", job_name, "job_id: ", job_id)
+    # 提取作业开始时间和相关信息
+    for i in range(len(log_data)):
+        line = log_data[i]
+        time_match = timestamp_pattern.match(line)
+        if time_match:
+            start_time_str = time_match.group(1)
+            start_time = datetime.strptime(start_time_str, "%a %b %d %H:%M:%S %Y")
 
-for i in range(len(log_data)):
-    line = log_data[i]
-    time_match = timestamp_pattern.match(line)
+            job_name_match = job_name_pattern.match(log_data[i+1])
+            if job_name_match is None:
+                continue
+            job_name = job_name_match.group(1)
 
-    if time_match:
-        end_time_str = time_match.group(1)
-        end_time = datetime.strptime(end_time_str, "%a %b %d %H:%M:%S %Y")
+            jobid_match = jobid_pattern.match(log_data[i+4])
+            if jobid_match is None:
+                continue
+            job_id = jobid_match.group(1)
 
-        finished_job_match = finished_job_pattern.match(log_data[i+1])
+            job_start_times[job_id] = {"start_time": start_time, "job_name": job_name}
 
-        if finished_job_match is None:
-            continue;
+    # 提取作业结束时间并计算耗时
+    for i in range(len(log_data)):
+        line = log_data[i]
+        time_match = timestamp_pattern.match(line)
 
-        job_id = finished_job_match.group(1)
+        if time_match:
+            end_time_str = time_match.group(1)
+            end_time = datetime.strptime(end_time_str, "%a %b %d %H:%M:%S %Y")
 
-        if job_id in job_start_times:
-            start_time = job_start_times[job_id]["start_time"]
-            job_name = job_start_times[job_id]["job_name"]
-            
-            # 计算耗时
-            duration = end_time - start_time
-            jobs.append({
-                "Job Name": job_name,
-                "Job ID": job_id,
-                "Duration": duration
-            })
+            finished_job_match = finished_job_pattern.match(log_data[i+1])
 
-# for job in jobs:
-#     print(f"Job Name: {job['Job Name']},\t Job ID: {job['Job ID']},\t Duration: {job['Duration']}")
+            if finished_job_match is None:
+                continue
 
-# 动态计算最大长度
-max_job_name_length = max(len(job['Job Name']) for job in jobs)
-max_job_id_length = max(len(str(job['Job ID'])) for job in jobs)
-max_duration_length = max(len(str(job['Duration'])) for job in jobs)
+            job_id = finished_job_match.group(1)
 
-# 输出时长格式化为小时:分钟:秒
-for job in jobs:
-    duration = job['Duration']
-    hours, remainder = divmod(duration.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    formatted_duration = f"{hours:02}:{minutes:02}:{seconds:02}"
-    
-    print(f"Job Name: {job['Job Name']:<{max_job_name_length}},\t Job ID: {job['Job ID']:<{max_job_id_length}},\t Duration: {formatted_duration:<{max_duration_length}}")
+            if job_id in job_start_times:
+                start_time = job_start_times[job_id]["start_time"]
+                job_name = job_start_times[job_id]["job_name"]
 
-# # 存储每个job的开始时间
+                # 计算耗时
+                duration = end_time - start_time
+                jobs[job_name] = int(duration.total_seconds())
+
+    return jobs
+
+# 示例使用
+log_file_path = "/home/scy24/asc-rna/.snakemake/log/2025-01-19T061536.814192.snakemake.log"
+
+# "2025-01-19T061536.814192.snakemake.log" # original stage-2
+log_name_list = ["case1-origin.log","case2-origin.log","case3-origin.log","case1-opt.log","case2-opt.log","case3-opt.log"]
+
+job_name_list = ["cut_fastq", "align_to_ncrna", "bam_to_fastq", "align_to_genome", \
+                 "sort_bam", "umi_dedup", "join_pileup","unfiltered_uniq", "unfiltered_multi", \
+                    "filter_bam",  "filtered_uniq", "filtered_multi", "join_pileup","stage_1_time"]
+
+all_time_dic = {}
 
 
-# # 存储结果
-# jobs = []
+for log_name in log_name_list:
 
-# # 提取开始时间
-# for match in re.finditer(job_start_pattern, log_data):
-#     print(match)
-#     start_time_str = match.group(1)
-#     job_name = match.group(2)
-#     job_id = match.group(3)
-    
-#     # 转换时间字符串为datetime对象
-#     start_time = datetime.strptime(start_time_str, "%a %b %d %H:%M:%S %Y")
-    
-#     # 记录每个job的开始时间
-#     job_start_times[job_id] = {"start_time": start_time, "job_name": job_name}
+    log_file_path = "/home/scy24/asc-rna/log-doc/" + log_name
+    job_durations = parse_log_for_job_duration(log_file_path)
 
-# # 提取结束时间并计算耗时
-# for match in re.finditer(job_end_pattern, log_data):
-#     end_time_str = match.group(1)
-#     job_id = match.group(2)
-    
-#     # 转换时间字符串为datetime对象
-#     end_time = datetime.strptime(end_time_str, "%a %b %d %H:%M:%S %Y")
-    
-    # 如果找到了对应job的开始时间
-    # if job_id in job_start_times:
-    #     start_time = job_start_times[job_id]["start_time"]
-    #     job_name = job_start_times[job_id]["job_name"]
-        
-    #     # 计算耗时
-    #     duration = end_time - start_time
-    #     jobs.append({
-    #         "Job Name": job_name,
-    #         "Job ID": job_id,
-    #         "Duration": duration
-    #     })
+    stage_1_time = cal_stage_1_time(job_durations)
+
+    job_durations["stage_1_time"] = stage_1_time
+
+    all_time_dic[log_name] = job_durations
+
+
+
+for job_name in job_name_list:
+    print(job_name, end = " & ")
+    for i in range(len(log_name_list)):
+        log_name = log_name_list[i]
+        if i == len(log_name_list) - 1:
+            print(all_time_dic[log_name][job_name], end = " \\\\")
+        else:
+            print(all_time_dic[log_name][job_name], end = " & ")
+
+    print()
+# job_durations = parse_log_for_job_duration(log_file_path)
 
 # # 输出结果
-# for job in jobs:
-#     print(f"Job Name: {job['Job Name']}, Job ID: {job['Job ID']}, Duration: {job['Duration']}")
+# for job_name, duration in job_durations.items():
+#     print(f"Job Name: {job_name}, Duration: {duration} seconds")

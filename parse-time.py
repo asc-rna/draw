@@ -10,13 +10,21 @@ def cal_stage_1_time(dic):
 
     return multi_time + other_time
 
+def clean_ansi_escape(text):
+    # 去除开头的 [32m 和结尾的 [0m
+    text = re.sub(r'^\x1b\[32m', '', text)  # 去除行首的 [32m
+    text = re.sub(r'\x1b\[0m$', '', text)   # 去除行尾的 [0m
+    return text
 
 def parse_log_for_job_duration(log_file_path):
     # 打开文件并读取内容
     with open(log_file_path, "r") as file:
         log_data = file.readlines()
 
-    timestamp_pattern = re.compile(r'\[(.*?)\]')
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*[mGKH]')
+
+    # timestamp_pattern = re.compile(r'\[(.*?)\]')
+    timestamp_pattern = re.compile(r'\[([A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{2}:\d{2}:\d{2} \d{4})\]')
     job_name_pattern = re.compile(r'localrule\s+(\S+):')
     jobid_pattern = re.compile(r'\s+jobid:\s*(\d+)')
     finished_job_pattern = re.compile(r'Finished\s+job\s+(\d+)')
@@ -27,6 +35,12 @@ def parse_log_for_job_duration(log_file_path):
     # 提取作业开始时间和相关信息
     for i in range(len(log_data)):
         line = log_data[i]
+
+        print(line)
+
+        line = clean_ansi_escape(line)
+
+        print(line)
         time_match = timestamp_pattern.match(line)
         if time_match:
             start_time_str = time_match.group(1)
@@ -85,8 +99,9 @@ all_time_dic = {}
 
 for log_name in log_name_list:
 
-    log_file_path = "/home/scy24/asc-rna/log-doc/" + log_name
+    log_file_path = "/home/scy24/draw/log-doc/" + log_name
     job_durations = parse_log_for_job_duration(log_file_path)
+    print(f"job_durations for {log_name}", job_durations)
 
     stage_1_time = cal_stage_1_time(job_durations)
 
